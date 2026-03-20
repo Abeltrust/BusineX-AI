@@ -1,0 +1,7 @@
+{
+  "name": "BusineX Ai",
+  "description": "A world-class AI-powered startup ecosystem connecting ideas, founders, and investors globally with hyper-local intelligence.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
