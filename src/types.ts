@@ -1,80 +1,57 @@
-export type UserType = 'founder' | 'investor';
+export type BusinessStage = 'idea' | 'mvp' | 'traction' | 'scale';
+export type TaskStatus = 'backlog' | 'in_progress' | 'done';
+export type LeadStage = 'new' | 'contacted' | 'proposal' | 'won';
 
-export interface UserProfile {
-  uid?: string;
-  email?: string;
-  photoURL?: string;
-  type: UserType;
-  name: string;
+export interface FounderProfile {
+  founderName: string;
+  businessName: string;
+  stage: BusinessStage;
   location: {
     city: string;
     country: string;
   };
+  industry: string;
+  targetCustomer: string;
+  businessModel: string;
   background: string;
-  skills: string[];
-  interests: string[];
+  goals: string[];
   capital: number;
-  wallet: Wallet;
-  investorProfile?: {
-    riskAppetite: 'low' | 'medium' | 'high';
-    industryPreferences: string[];
-    minInvestment: number;
-    maxInvestment: number;
-  };
+  monthlyBurn: number;
 }
 
-export interface Wallet {
-  balance: number;
-  investments: Investment[];
-  receivedFunds: number;
-  returns: number;
-}
-
-export interface Investment {
+export interface FounderTask {
   id: string;
-  businessId: string;
-  businessName: string;
-  amount: number;
-  equity: number;
-  date: string;
+  title: string;
+  owner: string;
+  dueDate: string;
+  status: TaskStatus;
+  priority: 'low' | 'medium' | 'high';
 }
 
-export interface BusinessIdea {
+export interface SalesLead {
   id: string;
   name: string;
-  concept: string;
-  problem: string;
-  solution: string;
-  targetMarket: string;
-  competitiveAdvantage: string;
-  roadmap?: Roadmap;
-  investorReady?: PitchDeck;
+  company: string;
+  stage: LeadStage;
+  value: number;
+  nextAction: string;
 }
 
-export interface Roadmap {
-  day1: string;
-  first30Days: string;
-  sixMonths: string;
-  fiveToTenYears: string;
-  tools: string[];
-  costBreakdown: string;
-  revenueStreams: string[];
+export interface FounderStrategy {
+  summary: string;
+  valueProposition: string;
+  priorities: string[];
+  milestones: string[];
+  goToMarket: string[];
+  operations: string[];
+  financeNotes: string[];
   risks: string[];
-}
-
-export interface PitchDeck {
-  executiveSummary: string;
-  marketOpportunity: string;
-  businessModel: string;
-  financialProjections: string;
-  fundingRequired: number;
-  suggestedEquity: number;
 }
 
 export interface BusinessClinicReport {
   diagnosis: string;
   recoveryStrategies: string[];
-  growthHacks: string[];
+  growthRecommendations: string[];
   pivotOpportunities: string[];
   investmentReadySteps: string[];
 }
