@@ -1,923 +1,1136 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Rocket, 
-  TrendingUp, 
-  Users, 
-  Globe, 
-  Wallet as WalletIcon, 
-  Stethoscope, 
-  ChevronRight, 
-  Plus, 
-  Search, 
-  Lightbulb, 
-  Target, 
-  ShieldCheck,
+import React, { useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import {
   ArrowRight,
-  BarChart3,
-  MapPin,
   Briefcase,
-  DollarSign,
-  PieChart,
+  Building2,
+  CheckCircle2,
+  CircleDollarSign,
+  ClipboardList,
+  MapPin,
+  ShieldAlert,
+  Stethoscope,
+  Target,
+  TrendingUp,
+  Users,
+  Wallet,
   Zap,
-  Download,
-  FileText
 } from 'lucide-react';
-import { UserProfile, BusinessIdea, Roadmap, PitchDeck, BusinessClinicReport, UserType } from './types';
-import { generateBusinessIdeas, generateRoadmap, generatePitchDeck, diagnoseBusiness, generateInvestmentOpportunities } from './services/ai';
-import ReactMarkdown from 'react-markdown';
-import { jsPDF } from 'jspdf';
+import { diagnoseBusiness, generateFounderStrategy } from './services/ai';
+import {
+  BusinessClinicReport,
+  BusinessStage,
+  FounderProfile,
+  FounderStrategy,
+  FounderTask,
+  LeadStage,
+  SalesLead,
+  TaskStatus,
+} from './types';
 
+type AppStep = 'landing' | 'onboarding' | 'workspace' | 'clinic';
+type WorkspaceTab = 'overview' | 'execution' | 'crm' | 'finance';
 
-// --- Components ---
-// ... (rest of the components)
+type WorkspaceState = {
+  profile: FounderProfile;
+  strategy: FounderStrategy;
+  tasks: FounderTask[];
+  leads: SalesLead[];
+};
 
-const Card = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
-  <div className={`bg-white border border-black/5 rounded-2xl shadow-sm overflow-hidden ${className}`}>
-    {children}
-  </div>
-);
+const STORAGE_KEY = 'businessx_founder_workspace';
 
-const Button = ({ 
-  children, 
-  onClick, 
-  variant = 'primary', 
-  className = "",
-  disabled = false,
-  loading = false
-}: { 
-  children: React.ReactNode; 
-  onClick?: () => void; 
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
+const stageLabel: Record<BusinessStage, string> = {
+  idea: 'Idea',
+  mvp: 'Validation',
+  traction: 'Traction',
+  scale: 'Scale',
+};
+
+const taskColumns: TaskStatus[] = ['backlog', 'in_progress', 'done'];
+const leadStages: LeadStage[] = ['new', 'contacted', 'proposal', 'won'];
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(value);
+
+const createId = () => Math.random().toString(36).slice(2, 10);
+
+const createInitialTasks = (profile: FounderProfile, strategy: FounderStrategy): FounderTask[] => [
+  {
+    id: createId(),
+    title: `Define the core ${profile.businessName} offer`,
+    owner: profile.founderName,
+    dueDate: 'This week',
+    status: 'backlog',
+    priority: 'high',
+  },
+  {
+    id: createId(),
+    title: strategy.priorities[0] || 'Run five customer discovery calls',
+    owner: profile.founderName,
+    dueDate: 'This week',
+    status: 'in_progress',
+    priority: 'high',
+  },
+  {
+    id: createId(),
+    title: 'Create a repeatable weekly operating review',
+    owner: profile.founderName,
+    dueDate: 'Next week',
+    status: 'done',
+    priority: 'medium',
+  },
+];
+
+const createInitialLeads = (profile: FounderProfile): SalesLead[] => [
+  {
+    id: createId(),
+    name: 'Aisha Bello',
+    company: `${profile.location.city} Growth Network`,
+    stage: 'new',
+    value: 1200,
+    nextAction: 'Schedule discovery call',
+  },
+  {
+    id: createId(),
+    name: 'Michael Chen',
+    company: 'Pilot Customer',
+    stage: 'proposal',
+    value: 3500,
+    nextAction: 'Send proposal and timeline',
+  },
+  {
+    id: createId(),
+    name: 'Nora James',
+    company: 'Referral Partner',
+    stage: 'contacted',
+    value: 1800,
+    nextAction: 'Share one-pager and case study',
+  },
+];
+
+const Card: React.FC<{
   className?: string;
+  children: React.ReactNode;
+}> = ({
+  className = '',
+  children,
+}) => <div className={`panel rounded-[28px] ${className}`}>{children}</div>;
+
+const Button: React.FC<{
+  children: React.ReactNode;
+  className?: string;
+  onClick?: () => void;
+  variant?: 'primary' | 'secondary' | 'ghost' | 'outline';
   disabled?: boolean;
   loading?: boolean;
+  type?: 'button' | 'submit';
+}> = ({
+  children,
+  className = '',
+  onClick,
+  variant = 'primary',
+  disabled = false,
+  loading = false,
+  type = 'button',
 }) => {
   const variants = {
-    primary: 'bg-black text-white hover:bg-zinc-800',
-    secondary: 'bg-emerald-600 text-white hover:bg-emerald-700',
-    outline: 'border border-black/10 text-black hover:bg-black/5',
-    ghost: 'text-zinc-500 hover:text-black hover:bg-black/5'
+    primary: 'btn-primary',
+    secondary: 'btn-secondary',
+    ghost: 'btn-ghost',
+    outline: 'btn-outline',
   };
 
   return (
-    <button 
+    <button
+      type={type}
       onClick={onClick}
       disabled={disabled || loading}
-      className={`px-6 py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
     >
-      {loading ? <Zap className="w-4 h-4 animate-spin" /> : children}
+      {loading ? <Zap className="h-4 w-4 animate-spin" /> : children}
     </button>
   );
 };
 
-// --- Main App ---
+const Pill: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span className="pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em]">
+    {children}
+  </span>
+);
 
 export default function App() {
-  const [step, setStep] = useState<'landing' | 'onboarding' | 'dashboard' | 'clinic' | 'wallet'>('landing');
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [ideas, setIdeas] = useState<BusinessIdea[]>([]);
-  const [selectedIdea, setSelectedIdea] = useState<BusinessIdea | null>(null);
+  const [step, setStep] = useState<AppStep>('landing');
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('overview');
+  const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [loading, setLoading] = useState(false);
+  const [clinicLoading, setClinicLoading] = useState(false);
+  const [clinicInput, setClinicInput] = useState('');
   const [clinicReport, setClinicReport] = useState<BusinessClinicReport | null>(null);
+  const [newTask, setNewTask] = useState('');
+  const [newLead, setNewLead] = useState({
+    name: '',
+    company: '',
+    value: 1000,
+    nextAction: '',
+  });
 
-  // Load from localStorage on mount
+  const [form, setForm] = useState({
+    founderName: '',
+    businessName: '',
+    stage: 'idea' as BusinessStage,
+    city: '',
+    country: '',
+    industry: '',
+    targetCustomer: '',
+    businessModel: '',
+    background: '',
+    goals: '',
+    capital: 5000,
+    monthlyBurn: 1000,
+  });
+
   useEffect(() => {
-    const savedUser = localStorage.getItem('businessx_user');
-    const savedIdeas = localStorage.getItem('businessx_ideas');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      setStep('dashboard');
-    }
-    if (savedIdeas) {
-      setIdeas(JSON.parse(savedIdeas));
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved) as WorkspaceState;
+      setWorkspace(parsed);
+      setStep('workspace');
+    } catch (error) {
+      console.error('Failed to restore workspace', error);
     }
   }, []);
 
-  // Save to localStorage on change
   useEffect(() => {
-    if (user) localStorage.setItem('businessx_user', JSON.stringify(user));
-    if (ideas.length > 0) localStorage.setItem('businessx_ideas', JSON.stringify(ideas));
-  }, [user, ideas]);
+    if (!workspace) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(workspace));
+  }, [workspace]);
 
-  // Onboarding State
-  const [onboardingData, setOnboardingData] = useState({
-    type: 'founder' as UserType,
-    name: '',
-    city: '',
-    country: '',
-    background: '',
-    skills: '',
-    interests: '',
-    capital: 0,
-    riskAppetite: 'medium' as 'low' | 'medium' | 'high',
-    industryPreferences: '',
-    minInvestment: 1000,
-    maxInvestment: 50000
-  });
+  const metrics = useMemo(() => {
+    if (!workspace) return null;
 
-  const handleOnboardingSubmit = async () => {
-    const profile: UserProfile = {
-      type: onboardingData.type,
-      name: onboardingData.name,
-      location: { city: onboardingData.city, country: onboardingData.country },
-      background: onboardingData.background,
-      skills: onboardingData.skills.split(',').map(s => s.trim()),
-      interests: onboardingData.interests.split(',').map(i => i.trim()),
-      capital: onboardingData.capital,
-      wallet: { balance: onboardingData.capital, investments: [], receivedFunds: 0, returns: 0 },
-      investorProfile: onboardingData.type === 'investor' ? {
-        riskAppetite: onboardingData.riskAppetite,
-        industryPreferences: onboardingData.industryPreferences.split(',').map(s => s.trim()),
-        minInvestment: onboardingData.minInvestment,
-        maxInvestment: onboardingData.maxInvestment
-      } : undefined
+    const leadValue = workspace.leads.reduce((sum, lead) => sum + lead.value, 0);
+    const openTasks = workspace.tasks.filter((task) => task.status !== 'done').length;
+    const wonDeals = workspace.leads.filter((lead) => lead.stage === 'won').length;
+    const runwayMonths = Math.max(
+      1,
+      Math.floor(workspace.profile.capital / Math.max(workspace.profile.monthlyBurn, 1)),
+    );
+
+    return {
+      leadValue,
+      openTasks,
+      wonDeals,
+      runwayMonths,
     };
-    setUser(profile);
-    setLoading(true);
-    setStep('dashboard');
-    
-    try {
-      if (profile.type === 'founder') {
-        const generatedIdeas = await generateBusinessIdeas(profile);
-        setIdeas(generatedIdeas);
-      } else {
-        const opportunities = await generateInvestmentOpportunities(profile);
-        setIdeas(opportunities);
-      }
-    } catch (error) {
-      console.error("Error generating content:", error);
-    }
-    setLoading(false);
-  };
+  }, [workspace]);
 
-  const handleSelectIdea = async (idea: BusinessIdea) => {
-    setSelectedIdea(idea);
-    if (!idea.roadmap) {
-      setLoading(true);
-      try {
-        const roadmap = await generateRoadmap(idea, user!);
-        const pitchDeck = await generatePitchDeck(idea);
-        const updatedIdea = { ...idea, roadmap, investorReady: pitchDeck };
-        setIdeas(prev => prev.map(i => i.id === idea.id ? updatedIdea : i));
-        setSelectedIdea(updatedIdea);
-      } catch (error) {
-        console.error("Error generating roadmap/pitch:", error);
-      }
+  const createWorkspace = async () => {
+    const profile: FounderProfile = {
+      founderName: form.founderName,
+      businessName: form.businessName,
+      stage: form.stage,
+      location: {
+        city: form.city,
+        country: form.country,
+      },
+      industry: form.industry,
+      targetCustomer: form.targetCustomer,
+      businessModel: form.businessModel,
+      background: form.background,
+      goals: form.goals
+        .split(',')
+        .map((goal) => goal.trim())
+        .filter(Boolean),
+      capital: form.capital,
+      monthlyBurn: form.monthlyBurn,
+    };
+
+    setLoading(true);
+    try {
+      const strategy = await generateFounderStrategy(profile);
+      setWorkspace({
+        profile,
+        strategy,
+        tasks: createInitialTasks(profile, strategy),
+        leads: createInitialLeads(profile),
+      });
+      setStep('workspace');
+      setActiveTab('overview');
+    } catch (error) {
+      console.error('Failed to create workspace', error);
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleClinicSubmit = async (businessInfo: string) => {
-    setLoading(true);
-    try {
-      const report = await diagnoseBusiness(businessInfo, user!);
-      setClinicReport(report);
-    } catch (error) {
-      console.error("Error diagnosing business:", error);
-    }
-    setLoading(false);
+  const updateTaskStatus = (taskId: string, status: TaskStatus) => {
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            tasks: current.tasks.map((task) => (task.id === taskId ? { ...task, status } : task)),
+          }
+        : current,
+    );
   };
 
-  const handleInvest = (idea: BusinessIdea) => {
-    if (!user || !idea.investorReady) return;
-    
-    const amount = idea.investorReady.fundingRequired;
-    if (user.wallet.balance < amount) {
-      alert("Insufficient funds in wallet!");
-      return;
-    }
+  const addTask = () => {
+    if (!newTask.trim()) return;
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            tasks: [
+              {
+                id: createId(),
+                title: newTask.trim(),
+                owner: current.profile.founderName,
+                dueDate: 'This week',
+                status: 'backlog',
+                priority: 'medium',
+              },
+              ...current.tasks,
+            ],
+          }
+        : current,
+    );
+    setNewTask('');
+  };
 
-    const newInvestment = {
-      id: Math.random().toString(36).substr(2, 9),
-      businessId: idea.id,
-      businessName: idea.name,
-      amount,
-      equity: idea.investorReady.suggestedEquity,
-      date: new Date().toISOString()
-    };
-
-    setUser({
-      ...user,
-      wallet: {
-        ...user.wallet,
-        balance: user.wallet.balance - amount,
-        investments: [...user.wallet.investments, newInvestment]
-      }
+  const advanceLead = (leadId: string) => {
+    setWorkspace((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        leads: current.leads.map((lead) => {
+          if (lead.id !== leadId) return lead;
+          const currentIndex = leadStages.indexOf(lead.stage);
+          const nextStage = leadStages[Math.min(currentIndex + 1, leadStages.length - 1)];
+          return { ...lead, stage: nextStage };
+        }),
+      };
     });
-    alert(`Successfully invested $${amount.toLocaleString()} in ${idea.name}!`);
   };
 
-  const downloadPDF = (type: 'roadmap' | 'pitch', idea: BusinessIdea) => {
-    const doc = new jsPDF();
-    const margin = 20;
-    let y = 20;
+  const addLead = () => {
+    if (!newLead.name.trim() || !newLead.company.trim()) return;
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            leads: [
+              {
+                id: createId(),
+                name: newLead.name.trim(),
+                company: newLead.company.trim(),
+                stage: 'new',
+                value: newLead.value,
+                nextAction: newLead.nextAction.trim() || 'Send intro message',
+              },
+              ...current.leads,
+            ],
+          }
+        : current,
+    );
+    setNewLead({
+      name: '',
+      company: '',
+      value: 1000,
+      nextAction: '',
+    });
+  };
 
-    doc.setFontSize(22);
-    doc.text(`BusineX Ai: ${idea.name}`, margin, y);
-    y += 15;
+  const runClinic = async () => {
+    if (!workspace || !clinicInput.trim()) return;
 
-    if (type === 'roadmap' && idea.roadmap) {
-      doc.setFontSize(16);
-      doc.text('Execution Roadmap', margin, y);
-      y += 10;
-      doc.setFontSize(12);
-      const phases = [
-        { label: 'Day 1', content: idea.roadmap.day1 },
-        { label: 'First 30 Days', content: idea.roadmap.first30Days },
-        { label: '6 Months', content: idea.roadmap.sixMonths },
-        { label: '5-10 Years', content: idea.roadmap.fiveToTenYears }
-      ];
-      phases.forEach(p => {
-        doc.setFont('helvetica', 'bold');
-        doc.text(p.label, margin, y);
-        y += 7;
-        doc.setFont('helvetica', 'normal');
-        const splitText = doc.splitTextToSize(p.content, 170);
-        doc.text(splitText, margin, y);
-        y += (splitText.length * 7) + 5;
-      });
-    } else if (type === 'pitch' && idea.investorReady) {
-      doc.setFontSize(16);
-      doc.text('Investor Pitch Deck', margin, y);
-      y += 10;
-      doc.setFontSize(12);
-      const sections = [
-        { label: 'Executive Summary', content: idea.investorReady.executiveSummary },
-        { label: 'Market Opportunity', content: idea.investorReady.marketOpportunity },
-        { label: 'Business Model', content: idea.investorReady.businessModel },
-        { label: 'Financial Projections', content: idea.investorReady.financialProjections }
-      ];
-      sections.forEach(s => {
-        doc.setFont('helvetica', 'bold');
-        doc.text(s.label, margin, y);
-        y += 7;
-        doc.setFont('helvetica', 'normal');
-        const splitText = doc.splitTextToSize(s.content, 170);
-        doc.text(splitText, margin, y);
-        y += (splitText.length * 7) + 5;
-      });
+    setClinicLoading(true);
+    try {
+      const report = await diagnoseBusiness(clinicInput.trim(), workspace.profile);
+      setClinicReport(report);
+      setStep('clinic');
+    } catch (error) {
+      console.error('Failed to diagnose business', error);
+    } finally {
+      setClinicLoading(false);
     }
+  };
 
-    doc.save(`${idea.name}_${type}.pdf`);
+  const resetWorkspace = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    setWorkspace(null);
+    setClinicReport(null);
+    setClinicInput('');
+    setStep('landing');
   };
 
   return (
-    <div className="min-h-screen bg-[#F9F9F9] text-zinc-900 font-sans selection:bg-emerald-100 selection:text-emerald-900">
-      {/* Navigation */}
-      <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-black/5 px-4 md:px-6 py-3 md:py-4 flex items-center justify-between">
-        <div className="flex items-center gap-2 cursor-pointer" onClick={() => setStep('landing')}>
-          <div className="w-8 h-8 md:w-10 md:h-10 bg-black rounded-lg md:rounded-xl flex items-center justify-center">
-            <Rocket className="text-white w-5 h-5 md:w-6 md:h-6" />
+    <div className="app-shell min-h-screen text-slate-900">
+      <nav className="sticky top-0 z-50 border-b border-slate-900/[0.08] bg-white/72 px-4 py-4 backdrop-blur-xl md:px-6">
+        <div className="mx-auto flex max-w-7xl items-center justify-between">
+          <button className="flex items-center gap-3" onClick={() => setStep(workspace ? 'workspace' : 'landing')}>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--primary)] shadow-lg shadow-sky-900/10">
+              <Briefcase className="h-5 w-5 text-white" />
+            </div>
+            <div className="text-left">
+              <p className="text-lg font-bold tracking-tight text-[var(--heading)]">BusineX AI</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-[var(--text-muted)]">Business Operations Workspace</p>
+            </div>
+          </button>
+
+          <div className="flex items-center gap-2 md:gap-3">
+            {workspace && (
+              <>
+                <Button variant="ghost" className="hidden md:inline-flex" onClick={() => setStep('workspace')}>
+                  Workspace
+                </Button>
+                <Button variant="ghost" className="hidden md:inline-flex" onClick={() => setStep('clinic')}>
+                  Review
+                </Button>
+              </>
+            )}
+            <Button variant="outline" onClick={resetWorkspace}>
+              Reset
+            </Button>
           </div>
-          <span className="text-lg md:text-xl font-bold tracking-tight">BusineX Ai</span>
         </div>
-        
-        {user && (
-          <div className="flex items-center gap-3 md:gap-6">
-            <div className="hidden sm:flex items-center gap-4 md:gap-6">
-              <button onClick={() => setStep('dashboard')} className={`text-xs md:text-sm font-medium ${step === 'dashboard' ? 'text-black' : 'text-zinc-400 hover:text-black'}`}>Dashboard</button>
-              <button onClick={() => setStep('clinic')} className={`text-xs md:text-sm font-medium ${step === 'clinic' ? 'text-black' : 'text-zinc-400 hover:text-black'}`}>Clinic</button>
-              <button onClick={() => setStep('wallet')} className={`text-xs md:text-sm font-medium ${step === 'wallet' ? 'text-black' : 'text-zinc-400 hover:text-black'}`}>Wallet</button>
-            </div>
-            <div className="flex items-center gap-2 md:gap-3 pl-3 md:pl-6 border-l border-black/5">
-              <div className="text-right hidden xs:block">
-                <p className="text-[10px] md:text-xs font-semibold text-zinc-400 uppercase tracking-wider">{user.type}</p>
-                <p className="text-xs md:text-sm font-bold truncate max-w-[80px] md:max-w-none">{user.name}</p>
-              </div>
-              <div className="w-8 h-8 md:w-10 md:h-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 font-bold text-sm md:text-base">
-                {user.name[0]}
-              </div>
-            </div>
-          </div>
-        )}
       </nav>
 
-      <main className="max-w-7xl mx-auto px-4 md:px-6 py-6 md:py-12">
+      <main className="mx-auto max-w-7xl px-4 py-8 md:px-6 md:py-12">
         <AnimatePresence mode="wait">
-          {/* Landing Page */}
           {step === 'landing' && (
-            <motion.div 
+            <motion.section
               key="landing"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="flex flex-col items-center text-center gap-6 md:gap-8 py-10 md:py-20"
+              className="space-y-10 md:space-y-16"
             >
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 md:px-4 md:py-2 bg-emerald-50 text-emerald-700 rounded-full text-[10px] md:text-sm font-semibold mb-2 md:mb-4">
-                <Zap className="w-3 h-3 md:w-4 md:h-4" />
-                <span>The Future of Global Entrepreneurship</span>
-              </div>
-              <h1 className="text-4xl sm:text-6xl md:text-8xl font-bold tracking-tighter max-w-4xl leading-[0.95] md:leading-[0.9]">
-                Idea to <span className="text-emerald-600">Execution</span> in Seconds.
-              </h1>
-              <p className="text-base md:text-xl text-zinc-500 max-w-2xl leading-relaxed px-4">
-                The world's first AI-powered startup ecosystem. Connect ideas, founders, and investors globally with hyper-local intelligence.
-              </p>
-              <div className="flex flex-col sm:flex-row justify-center gap-3 md:gap-4 mt-4 md:mt-8 w-full sm:w-auto px-4">
-                <Button onClick={() => setStep('onboarding')} className="text-base md:text-lg px-6 md:px-10 py-3 md:py-4 w-full sm:w-auto">
-                  Launch Your Vision <ChevronRight className="w-4 h-4 md:w-5 md:h-5" />
-                </Button>
-                <Button variant="outline" className="text-base md:text-lg px-6 md:px-10 py-3 md:py-4 w-full sm:w-auto">
-                  Explore Opportunities
-                </Button>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-8 mt-12 md:mt-24 w-full">
-                {[
-                  { icon: Lightbulb, title: "AI Ideation", desc: "Hyper-local business generation based on real-world problems." },
-                  { icon: Target, title: "Growth Roadmaps", desc: "Actionable execution plans from Day 1 to 10-year vision." },
-                  { icon: ShieldCheck, title: "Investor Ready", desc: "Automated pitch decks and fundable startup profiles." }
-                ].map((feature, i) => (
-                  <Card key={i} className="p-6 md:p-8 text-left hover:border-emerald-500/30 transition-colors group">
-                    <div className="w-10 h-10 md:w-12 md:h-12 bg-zinc-100 rounded-lg md:rounded-xl flex items-center justify-center mb-4 md:mb-6 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors">
-                      <feature.icon className="w-5 h-5 md:w-6 md:h-6" />
-                    </div>
-                    <h3 className="text-lg md:text-xl font-bold mb-2">{feature.title}</h3>
-                    <p className="text-sm md:text-base text-zinc-500 leading-relaxed">{feature.desc}</p>
-                  </Card>
-                ))}
-              </div>
-            </motion.div>
-          )}
-
-          {/* Onboarding */}
-          {step === 'onboarding' && (
-            <motion.div 
-              key="onboarding"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="max-w-2xl mx-auto px-2 md:px-0"
-            >
-              <Card className="p-6 md:p-10">
-                <h2 className="text-2xl md:text-3xl font-bold mb-6 md:mb-8 tracking-tight">Tell us about your vision</h2>
-                <div className="space-y-4 md:space-y-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                    <button 
-                      onClick={() => setOnboardingData({...onboardingData, type: 'founder'})}
-                      className={`p-4 md:p-6 rounded-xl md:rounded-2xl border-2 transition-all text-left ${onboardingData.type === 'founder' ? 'border-black bg-black text-white' : 'border-black/5 hover:border-black/20'}`}
-                    >
-                      <Briefcase className="w-6 h-6 md:w-8 md:h-8 mb-3 md:mb-4" />
-                      <p className="font-bold text-base md:text-lg">I'm a Founder</p>
-                      <p className={`text-xs md:text-sm ${onboardingData.type === 'founder' ? 'text-zinc-400' : 'text-zinc-500'}`}>I want to build or grow a business.</p>
-                    </button>
-                    <button 
-                      onClick={() => setOnboardingData({...onboardingData, type: 'investor'})}
-                      className={`p-4 md:p-6 rounded-xl md:rounded-2xl border-2 transition-all text-left ${onboardingData.type === 'investor' ? 'border-black bg-black text-white' : 'border-black/5 hover:border-black/20'}`}
-                    >
-                      <TrendingUp className="w-6 h-6 md:w-8 md:h-8 mb-3 md:mb-4" />
-                      <p className="font-bold text-base md:text-lg">I'm an Investor</p>
-                      <p className={`text-xs md:text-sm ${onboardingData.type === 'investor' ? 'text-zinc-400' : 'text-zinc-500'}`}>I want to fund high-impact startups.</p>
-                    </button>
-                  </div>
-
-                  <div className="space-y-3 md:space-y-4">
-                    <div>
-                      <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Full Name</label>
-                      <input 
-                        type="text" 
-                        className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                        placeholder="John Doe"
-                        value={onboardingData.name}
-                        onChange={e => setOnboardingData({...onboardingData, name: e.target.value})}
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                      <div>
-                        <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">City</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                          placeholder="Lagos"
-                          value={onboardingData.city}
-                          onChange={e => setOnboardingData({...onboardingData, city: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Country</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                          placeholder="Nigeria"
-                          value={onboardingData.country}
-                          onChange={e => setOnboardingData({...onboardingData, country: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Background & Experience</label>
-                      <textarea 
-                        className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all min-h-[80px] md:min-h-[100px] text-sm md:text-base"
-                        placeholder="Tell us about your skills and professional history..."
-                        value={onboardingData.background}
-                        onChange={e => setOnboardingData({...onboardingData, background: e.target.value})}
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                      <div>
-                        <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Skills (comma separated)</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                          placeholder="Coding, Design, Marketing"
-                          value={onboardingData.skills}
-                          onChange={e => setOnboardingData({...onboardingData, skills: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Interests (comma separated)</label>
-                        <input 
-                          type="text" 
-                          className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                          placeholder="Fintech, AI, Green Energy"
-                          value={onboardingData.interests}
-                          onChange={e => setOnboardingData({...onboardingData, interests: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Available Capital (USD)</label>
-                      <input 
-                        type="number" 
-                        className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                        placeholder="5000"
-                        value={onboardingData.capital}
-                        onChange={e => setOnboardingData({...onboardingData, capital: Number(e.target.value)})}
-                      />
-                    </div>
-
-                    {onboardingData.type === 'investor' && (
-                      <div className="space-y-3 md:space-y-4 pt-3 md:pt-4 border-t border-black/5">
-                        <h4 className="font-bold text-base md:text-lg">Investor Preferences</h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                          <div>
-                            <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Risk Appetite</label>
-                            <select 
-                              className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all bg-white text-sm md:text-base"
-                              value={onboardingData.riskAppetite}
-                              onChange={e => setOnboardingData({...onboardingData, riskAppetite: e.target.value as any})}
-                            >
-                              <option value="low">Low</option>
-                              <option value="medium">Medium</option>
-                              <option value="high">High</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Industry Focus</label>
-                            <input 
-                              type="text" 
-                              className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                              placeholder="Tech, Health, Real Estate"
-                              value={onboardingData.industryPreferences}
-                              onChange={e => setOnboardingData({...onboardingData, industryPreferences: e.target.value})}
-                            />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-                          <div>
-                            <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Min Investment</label>
-                            <input 
-                              type="number" 
-                              className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                              value={onboardingData.minInvestment}
-                              onChange={e => setOnboardingData({...onboardingData, minInvestment: Number(e.target.value)})}
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Max Investment</label>
-                            <input 
-                              type="number" 
-                              className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all text-sm md:text-base"
-                              value={onboardingData.maxInvestment}
-                              onChange={e => setOnboardingData({...onboardingData, maxInvestment: Number(e.target.value)})}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <Button 
-                    onClick={handleOnboardingSubmit} 
-                    className="w-full py-3 md:py-4 text-base md:text-lg mt-2 md:mt-4"
-                    disabled={!onboardingData.name || !onboardingData.city}
-                  >
-                    Enter Ecosystem <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
-                  </Button>
-                </div>
-              </Card>
-            </motion.div>
-          )}
-
-          {/* Dashboard */}
-          {step === 'dashboard' && user && (
-            <motion.div 
-              key="dashboard"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="space-y-6 md:space-y-12"
-            >
-              <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6">
-                <div>
-                  <h2 className="text-2xl md:text-4xl font-bold tracking-tight mb-1 md:mb-2">Welcome back, {user.name.split(' ')[0]}</h2>
-                  <p className="text-xs md:text-base text-zinc-500 flex items-center gap-2">
-                    <MapPin className="w-3 h-3 md:w-4 md:h-4" /> {user.location.city}, {user.location.country} • {user.type === 'founder' ? 'Founder Mode' : 'Investor Mode'}
+              <div className="grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:items-center">
+                <div className="space-y-6">
+                  <Pill>Strategy, execution, and oversight</Pill>
+                  <h1 className="max-w-4xl font-display text-5xl font-bold leading-[0.92] tracking-tight md:text-7xl">
+                    Business planning and execution support for companies building with discipline.
+                  </h1>
+                  <p className="max-w-2xl text-lg leading-relaxed text-[var(--text-muted)]">
+                    BusineX brings commercial planning, operating priorities, pipeline visibility, and
+                    business review workflows into one clear workspace for founders and small teams.
                   </p>
-                </div>
-                <div className="flex gap-2 md:gap-3">
-                  <Button variant="outline" onClick={() => setStep('clinic')} className="text-xs md:text-sm px-3 md:px-6 py-2 md:py-3 flex-1 md:flex-none">
-                    <Stethoscope className="w-3 h-3 md:w-4 md:h-4" /> Business Clinic
-                  </Button>
-                  {user.type === 'founder' && (
-                    <Button onClick={() => handleOnboardingSubmit()} loading={loading} className="text-xs md:text-sm px-3 md:px-6 py-2 md:py-3 flex-1 md:flex-none">
-                      <Plus className="w-3 h-3 md:w-4 md:h-4" /> New Ideas
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <Button className="text-base" onClick={() => setStep('onboarding')}>
+                      Create Workspace <ArrowRight className="h-4 w-4" />
                     </Button>
-                  )}
+                    <Button variant="outline" className="text-base" onClick={() => setStep('clinic')}>
+                      Open Business Review
+                    </Button>
+                  </div>
                 </div>
-              </div>
 
-              {loading ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-8">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="h-[300px] md:h-[400px] bg-zinc-100 animate-pulse rounded-xl md:rounded-2xl" />
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
-                  {/* Ideas / Opportunities List */}
-                  <div className="lg:col-span-1 space-y-3 md:space-y-4">
-                    <h3 className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-2 md:mb-4">
-                      {user.type === 'founder' ? 'AI-Generated Ideas' : 'Investment Opportunities'}
-                    </h3>
-                    <div className="flex lg:flex-col gap-3 overflow-x-auto lg:overflow-x-visible pb-2 lg:pb-0 scrollbar-hide">
-                      {ideas.map((idea) => (
-                        <button 
-                          key={idea.id}
-                          onClick={() => handleSelectIdea(idea)}
-                          className={`min-w-[240px] lg:min-w-0 w-full text-left p-4 md:p-6 rounded-xl md:rounded-2xl border-2 transition-all group ${selectedIdea?.id === idea.id ? 'border-emerald-500 bg-emerald-50/30' : 'border-black/5 bg-white hover:border-black/20'}`}
-                        >
-                          <div className="flex justify-between items-start mb-3 md:mb-4">
-                            <div className="w-8 h-8 md:w-10 md:h-10 bg-zinc-100 rounded-lg flex items-center justify-center group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors">
-                              <Lightbulb className="w-4 h-4 md:w-5 md:h-5" />
-                            </div>
-                            <ChevronRight className={`w-4 h-4 md:w-5 md:h-5 transition-transform ${selectedIdea?.id === idea.id ? 'rotate-90 text-emerald-600' : 'text-zinc-300'}`} />
-                          </div>
-                          <h4 className="font-bold text-base md:text-lg mb-1 truncate">{idea.name}</h4>
-                          <p className="text-xs md:text-sm text-zinc-500 line-clamp-2">{idea.concept}</p>
-                        </button>
+                <Card className="panel-strong overflow-hidden text-white">
+                  <div className="space-y-6 p-8">
+                    <div className="flex items-center justify-between">
+                      <Pill>Platform capabilities</Pill>
+                      <Building2 className="h-5 w-5 text-sky-200" />
+                    </div>
+                    <div className="grid gap-4">
+                      {[
+                        'Centralize business context, goals, operating assumptions, and financial inputs.',
+                        'Generate stage-aware plans with practical priorities and milestones.',
+                        'Track delivery tasks, commercial opportunities, and cash exposure in one view.',
+                        'Review operating challenges and receive structured recovery recommendations.',
+                      ].map((item) => (
+                        <div key={item} className="rounded-2xl border border-white/10 bg-white/[0.06] p-4 text-sm text-slate-200">
+                          {item}
+                        </div>
                       ))}
                     </div>
                   </div>
-
-                  {/* Detailed View */}
-                  <div className="lg:col-span-2">
-                    {selectedIdea ? (
-                      <div className="space-y-6 md:space-y-8">
-                        <Card className="p-6 md:p-10">
-                          <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6 md:mb-8">
-                            <div>
-                              <h2 className="text-2xl md:text-4xl font-bold tracking-tight mb-1 md:mb-2">{selectedIdea.name}</h2>
-                              <p className="text-base md:text-lg text-zinc-500">{selectedIdea.concept}</p>
-                            </div>
-                            {user.type === 'investor' && (
-                              <Button variant="secondary" onClick={() => handleInvest(selectedIdea)} className="w-full sm:w-auto text-sm">
-                                <DollarSign className="w-4 h-4" /> Invest Now
-                              </Button>
-                            )}
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8 mb-8 md:mb-12">
-                            <div>
-                              <h4 className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-2 md:mb-3">The Problem</h4>
-                              <p className="text-sm md:text-base text-zinc-700 leading-relaxed">{selectedIdea.problem}</p>
-                            </div>
-                            <div>
-                              <h4 className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-2 md:mb-3">The Solution</h4>
-                              <p className="text-sm md:text-base text-zinc-700 leading-relaxed">{selectedIdea.solution}</p>
-                            </div>
-                            <div>
-                              <h4 className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-2 md:mb-3">Target Market</h4>
-                              <p className="text-sm md:text-base text-zinc-700 leading-relaxed">{selectedIdea.targetMarket}</p>
-                            </div>
-                            <div>
-                              <h4 className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-2 md:mb-3">Competitive Edge</h4>
-                              <p className="text-sm md:text-base text-zinc-700 leading-relaxed">{selectedIdea.competitiveAdvantage}</p>
-                            </div>
-                          </div>
-
-                          {loading ? (
-                            <div className="space-y-3 md:space-y-4">
-                              <div className="h-3 md:h-4 bg-zinc-100 animate-pulse rounded w-3/4" />
-                              <div className="h-3 md:h-4 bg-zinc-100 animate-pulse rounded w-1/2" />
-                              <div className="h-3 md:h-4 bg-zinc-100 animate-pulse rounded w-2/3" />
-                            </div>
-                          ) : selectedIdea.roadmap && (
-                            <div className="border-t border-black/5 pt-8 md:pt-12 space-y-8 md:space-y-12">
-                              {/* Roadmap Section */}
-                              <section>
-                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 md:mb-8">
-                                  <h3 className="text-xl md:text-2xl font-bold flex items-center gap-2 md:gap-3">
-                                    <BarChart3 className="text-emerald-600 w-5 h-5 md:w-6 md:h-6" /> Execution Roadmap
-                                  </h3>
-                                  <Button variant="outline" onClick={() => downloadPDF('roadmap', selectedIdea)} className="text-xs md:text-sm w-full sm:w-auto">
-                                    <Download className="w-3 h-3 md:w-4 md:h-4" /> Download PDF
-                                  </Button>
-                                </div>
-                                <div className="space-y-6 md:space-y-8 relative before:absolute before:left-3 md:before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-zinc-100">
-                                  {[
-                                    { label: "Day 1", content: selectedIdea.roadmap.day1 },
-                                    { label: "First 30 Days", content: selectedIdea.roadmap.first30Days },
-                                    { label: "6 Months", content: selectedIdea.roadmap.sixMonths },
-                                    { label: "5-10 Year Vision", content: selectedIdea.roadmap.fiveToTenYears }
-                                  ].map((phase, i) => (
-                                    <div key={i} className="relative pl-8 md:pl-12">
-                                      <div className="absolute left-0 top-1 w-6 h-6 md:w-8 md:h-8 bg-white border-2 border-emerald-500 rounded-full flex items-center justify-center z-10">
-                                        <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-emerald-500 rounded-full" />
-                                      </div>
-                                      <h5 className="font-bold text-base md:text-lg mb-1 md:mb-2">{phase.label}</h5>
-                                      <p className="text-sm md:text-base text-zinc-600 leading-relaxed">{phase.content}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                              </section>
-
-                              {/* Investor Ready Section */}
-                              {selectedIdea.investorReady && (
-                                <section className="bg-zinc-900 text-white rounded-2xl md:rounded-3xl p-6 md:p-10">
-                                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 md:mb-8">
-                                    <h3 className="text-xl md:text-2xl font-bold flex items-center gap-2 md:gap-3">
-                                      <ShieldCheck className="text-emerald-400 w-5 h-5 md:w-6 md:h-6" /> Investor-Ready Profile
-                                    </h3>
-                                    <Button variant="ghost" className="text-white hover:bg-white/10 text-xs md:text-sm w-full sm:w-auto" onClick={() => downloadPDF('pitch', selectedIdea)}>
-                                      <FileText className="w-3 h-3 md:w-4 md:h-4" /> Export Pitch
-                                    </Button>
-                                  </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-8 mb-6 md:mb-10">
-                                    <div className="p-4 md:p-6 bg-white/5 rounded-xl md:rounded-2xl border border-white/10">
-                                      <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-zinc-500 mb-1 md:mb-2">Funding Required</p>
-                                      <p className="text-xl md:text-3xl font-bold">${selectedIdea.investorReady.fundingRequired.toLocaleString()}</p>
-                                    </div>
-                                    <div className="p-4 md:p-6 bg-white/5 rounded-xl md:rounded-2xl border border-white/10">
-                                      <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-zinc-500 mb-1 md:mb-2">Equity Offered</p>
-                                      <p className="text-xl md:text-3xl font-bold">{selectedIdea.investorReady.suggestedEquity}%</p>
-                                    </div>
-                                    <div className="p-4 md:p-6 bg-white/5 rounded-xl md:rounded-2xl border border-white/10">
-                                      <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-zinc-500 mb-1 md:mb-2">Valuation</p>
-                                      <p className="text-xl md:text-3xl font-bold">${(selectedIdea.investorReady.fundingRequired / (selectedIdea.investorReady.suggestedEquity / 100)).toLocaleString()}</p>
-                                    </div>
-                                  </div>
-                                  <div className="space-y-4 md:space-y-6">
-                                    <div>
-                                      <h5 className="font-bold text-emerald-400 mb-1 md:mb-2 text-sm md:text-base">Executive Summary</h5>
-                                      <p className="text-xs md:text-sm text-zinc-400 leading-relaxed">{selectedIdea.investorReady.executiveSummary}</p>
-                                    </div>
-                                    <div>
-                                      <h5 className="font-bold text-emerald-400 mb-1 md:mb-2 text-sm md:text-base">Business Model</h5>
-                                      <p className="text-xs md:text-sm text-zinc-400 leading-relaxed">{selectedIdea.investorReady.businessModel}</p>
-                                    </div>
-                                  </div>
-                                </section>
-                              )}
-                            </div>
-                          )}
-                        </Card>
-                      </div>
-                    ) : (
-                      <div className="h-full flex flex-col items-center justify-center text-center p-8 md:p-12 border-2 border-dashed border-black/5 rounded-2xl md:rounded-3xl bg-white/50">
-                        <div className="w-16 h-16 md:w-20 md:h-20 bg-zinc-100 rounded-full flex items-center justify-center mb-4 md:mb-6">
-                          <Search className="w-8 h-8 md:w-10 md:h-10 text-zinc-300" />
-                        </div>
-                        <h3 className="text-xl md:text-2xl font-bold mb-2">Select an idea to explore</h3>
-                        <p className="text-sm md:text-base text-zinc-500 max-w-sm">Choose one of the AI-generated opportunities to see the full roadmap and investor profile.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          )}
-
-          {/* Business Clinic */}
-          {step === 'clinic' && user && (
-            <motion.div 
-              key="clinic"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="max-w-4xl mx-auto space-y-6 md:space-y-12 px-4 md:px-0"
-            >
-              <div className="text-center mb-8 md:mb-12">
-                <div className="w-12 h-12 md:w-16 md:h-16 bg-emerald-100 text-emerald-600 rounded-xl md:rounded-2xl flex items-center justify-center mx-auto mb-4 md:mb-6">
-                  <Stethoscope className="w-6 h-6 md:w-8 md:h-8" />
-                </div>
-                <h2 className="text-2xl md:text-4xl font-bold tracking-tight mb-2 md:mb-4">Business Diagnosis Clinic</h2>
-                <p className="text-base md:text-xl text-zinc-500">Already have a business? Let our AI diagnose challenges and prescribe growth strategies.</p>
+                </Card>
               </div>
 
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+                {[
+                  {
+                    icon: Target,
+                    title: 'Strategic Direction',
+                    text: 'Translate company context into priorities that fit the current stage of the business.',
+                  },
+                  {
+                    icon: ClipboardList,
+                    title: 'Execution Tracking',
+                    text: 'Convert strategic guidance into owned tasks, deadlines, and operating cadence.',
+                  },
+                  {
+                    icon: Users,
+                    title: 'Pipeline Management',
+                    text: 'Track prospects, proposals, and follow-up activity without leaving the workspace.',
+                  },
+                  {
+                    icon: CircleDollarSign,
+                    title: 'Financial Visibility',
+                    text: 'Keep cash position, burn rate, and commercial value in view during critical growth periods.',
+                  },
+                ].map((feature) => (
+                  <Card key={feature.title} className="p-6">
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--primary-soft)] text-[var(--primary)]">
+                      <feature.icon className="h-6 w-6" />
+                    </div>
+                    <h2 className="mb-2 text-xl font-bold">{feature.title}</h2>
+                    <p className="text-sm leading-relaxed text-[var(--text-muted)]">{feature.text}</p>
+                  </Card>
+                ))}
+              </div>
+            </motion.section>
+          )}
+
+          {step === 'onboarding' && (
+            <motion.section
+              key="onboarding"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mx-auto max-w-4xl"
+            >
               <Card className="p-6 md:p-10">
-                <div className="space-y-4 md:space-y-6">
+                <div className="mb-8 flex items-start justify-between gap-6">
                   <div>
-                    <label className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2 block">Business Description & Challenges</label>
-                    <textarea 
-                      className="w-full px-3 py-2 md:px-4 md:py-3 rounded-lg md:rounded-xl border border-black/10 focus:border-black outline-none transition-all min-h-[120px] md:min-h-[150px] text-sm md:text-base"
-                      placeholder="Describe your current business, industry, and the specific problems you're facing..."
-                      id="clinic-input"
-                    />
+                    <Pill>Business profile</Pill>
+                    <h1 className="mt-4 text-3xl font-bold tracking-tight md:text-5xl">Set up your workspace</h1>
+                    <p className="mt-3 max-w-2xl text-[var(--text-muted)]">
+                      Add the commercial, operational, and financial context for your business. BusineX uses
+                      it to prepare a working plan, a task list, and an initial pipeline view.
+                    </p>
                   </div>
-                  <Button 
-                    className="w-full py-3 md:py-4 text-base md:text-lg"
+                  <Building2 className="hidden h-12 w-12 text-slate-300 md:block" />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Founder name</span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.founderName}
+                      onChange={(e) => setForm({ ...form, founderName: e.target.value })}
+                      placeholder="Derek David"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Business name</span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.businessName}
+                      onChange={(e) => setForm({ ...form, businessName: e.target.value })}
+                      placeholder="BusineX AI"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Stage</span>
+                    <select
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.stage}
+                      onChange={(e) => setForm({ ...form, stage: e.target.value as BusinessStage })}
+                    >
+                      <option value="idea">Idea</option>
+                      <option value="mvp">Validation</option>
+                      <option value="traction">Traction</option>
+                      <option value="scale">Scale</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Industry</span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.industry}
+                      onChange={(e) => setForm({ ...form, industry: e.target.value })}
+                      placeholder="B2B SaaS"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">City</span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.city}
+                      onChange={(e) => setForm({ ...form, city: e.target.value })}
+                      placeholder="Lagos"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Country</span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.country}
+                      onChange={(e) => setForm({ ...form, country: e.target.value })}
+                      placeholder="Nigeria"
+                    />
+                  </label>
+                  <label className="space-y-2 md:col-span-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Target customer</span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.targetCustomer}
+                      onChange={(e) => setForm({ ...form, targetCustomer: e.target.value })}
+                      placeholder="SME founders who need operational visibility and AI planning"
+                    />
+                  </label>
+                  <label className="space-y-2 md:col-span-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Business model</span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.businessModel}
+                      onChange={(e) => setForm({ ...form, businessModel: e.target.value })}
+                      placeholder="Subscription with implementation add-on"
+                    />
+                  </label>
+                  <label className="space-y-2 md:col-span-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Founder background</span>
+                    <textarea
+                      className="min-h-28 w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.background}
+                      onChange={(e) => setForm({ ...form, background: e.target.value })}
+                      placeholder="Product, growth, engineering, and startup operations..."
+                    />
+                  </label>
+                  <label className="space-y-2 md:col-span-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Goals</span>
+                    <input
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.goals}
+                      onChange={(e) => setForm({ ...form, goals: e.target.value })}
+                      placeholder="Close first 5 customers, tighten offer, reach monthly recurring revenue"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Available capital</span>
+                    <input
+                      type="number"
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.capital}
+                      onChange={(e) => setForm({ ...form, capital: Number(e.target.value) })}
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--text-muted)]">Monthly burn</span>
+                    <input
+                      type="number"
+                      className="w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={form.monthlyBurn}
+                      onChange={(e) => setForm({ ...form, monthlyBurn: Number(e.target.value) })}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                  <Button
+                    className="text-base"
+                    onClick={createWorkspace}
                     loading={loading}
-                    onClick={() => {
-                      const input = document.getElementById('clinic-input') as HTMLTextAreaElement;
-                      if (input.value) handleClinicSubmit(input.value);
-                    }}
+                    disabled={
+                      !form.founderName ||
+                      !form.businessName ||
+                      !form.city ||
+                      !form.country ||
+                      !form.industry ||
+                      !form.targetCustomer ||
+                      !form.businessModel
+                    }
                   >
-                    Start Diagnosis <ArrowRight className="w-4 h-4 md:w-5 md:h-5" />
+                    Build Workspace <ArrowRight className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" onClick={() => setStep('landing')}>
+                    Back
                   </Button>
                 </div>
               </Card>
+            </motion.section>
+          )}
 
-              {clinicReport && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="space-y-6 md:space-y-12"
-                >
-                  <Card className="p-6 md:p-10 border-l-4 border-l-emerald-500">
-                    <h3 className="text-xl md:text-2xl font-bold mb-2 md:mb-4">AI Diagnosis</h3>
-                    <p className="text-base md:text-lg text-zinc-700 leading-relaxed">{clinicReport.diagnosis}</p>
-                  </Card>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
-                    <Card className="p-6 md:p-8">
-                      <h4 className="text-lg md:text-xl font-bold mb-4 md:mb-6 flex items-center gap-2">
-                        <Zap className="w-5 h-5 md:w-6 md:h-6 text-amber-500" /> Recovery Strategies
-                      </h4>
-                      <ul className="space-y-3 md:space-y-4">
-                        {clinicReport.recoveryStrategies.map((s, i) => (
-                          <li key={i} className="flex gap-3 text-sm md:text-base text-zinc-600">
-                            <div className="w-1.5 h-1.5 bg-amber-500 rounded-full mt-2 flex-shrink-0" />
-                            {s}
-                          </li>
-                        ))}
-                      </ul>
-                    </Card>
-                    <Card className="p-6 md:p-8">
-                      <h4 className="text-lg md:text-xl font-bold mb-4 md:mb-6 flex items-center gap-2">
-                        <TrendingUp className="w-5 h-5 md:w-6 md:h-6 text-emerald-500" /> Growth Hacks
-                      </h4>
-                      <ul className="space-y-3 md:space-y-4">
-                        {clinicReport.growthHacks.map((s, i) => (
-                          <li key={i} className="flex gap-3 text-sm md:text-base text-zinc-600">
-                            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-2 flex-shrink-0" />
-                            {s}
-                          </li>
-                        ))}
-                      </ul>
-                    </Card>
+          {step === 'workspace' && workspace && metrics && (
+            <motion.section
+              key="workspace"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="space-y-8"
+            >
+              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+                <Card className="panel-strong overflow-hidden text-white">
+                  <div className="space-y-6 p-8">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Pill>{stageLabel[workspace.profile.stage]} stage</Pill>
+                      <span className="text-sm text-slate-300">
+                        <MapPin className="mr-1 inline h-4 w-4" />
+                        {workspace.profile.location.city}, {workspace.profile.location.country}
+                      </span>
+                    </div>
+                    <div>
+                      <h1 className="text-3xl font-bold tracking-tight md:text-5xl">{workspace.profile.businessName}</h1>
+                      <p className="mt-3 max-w-2xl text-base leading-relaxed text-slate-200">
+                        {workspace.strategy.summary}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                      <Button variant="secondary" onClick={() => setActiveTab('execution')}>
+                        Open Execution
+                      </Button>
+                      <Button variant="ghost" className="bg-white/[0.08] text-white hover:bg-white/[0.12]" onClick={() => setStep('clinic')}>
+                        Open Business Review
+                      </Button>
+                    </div>
                   </div>
+                </Card>
 
-                  <Card className="p-6 md:p-10 bg-black text-white">
-                    <h3 className="text-xl md:text-2xl font-bold mb-6 md:mb-8 flex items-center gap-2 md:gap-3">
-                      <ShieldCheck className="w-6 h-6 md:w-8 md:h-8 text-emerald-400" /> Investor-Ready Roadmap
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+                  <Card className="p-6">
+                    <div className="flex items-center justify-between">
                       <div>
-                        <h5 className="font-bold text-emerald-400 mb-3 md:mb-4 uppercase tracking-widest text-[10px] md:text-xs">Pivot Opportunities</h5>
-                        <ul className="space-y-3 md:space-y-4">
-                          {clinicReport.pivotOpportunities.map((s, i) => (
-                            <li key={i} className="text-xs md:text-sm text-zinc-400 leading-relaxed">{s}</li>
-                          ))}
-                        </ul>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Runway</p>
+                        <p className="mt-2 text-3xl font-bold">{metrics.runwayMonths} months</p>
                       </div>
+                      <Wallet className="h-8 w-8 text-[var(--primary)]" />
+                    </div>
+                  </Card>
+                  <Card className="p-6">
+                    <div className="flex items-center justify-between">
                       <div>
-                        <h5 className="font-bold text-emerald-400 mb-3 md:mb-4 uppercase tracking-widest text-[10px] md:text-xs">Next Steps for Funding</h5>
-                        <ul className="space-y-3 md:space-y-4">
-                          {clinicReport.investmentReadySteps.map((s, i) => (
-                            <li key={i} className="flex gap-2 md:gap-3 text-xs md:text-sm text-zinc-400">
-                              <span className="text-emerald-500 font-bold">{i + 1}.</span>
-                              {s}
-                            </li>
-                          ))}
-                        </ul>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Pipeline value</p>
+                        <p className="mt-2 text-3xl font-bold">{formatCurrency(metrics.leadValue)}</p>
+                      </div>
+                      <TrendingUp className="h-8 w-8 text-[#1b6b62]" />
+                    </div>
+                  </Card>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-4">
+                {[
+                  {
+                    label: 'Open tasks',
+                    value: metrics.openTasks,
+                    icon: ClipboardList,
+                  },
+                  {
+                    label: 'Active leads',
+                    value: workspace.leads.length,
+                    icon: Users,
+                  },
+                  {
+                    label: 'Won deals',
+                    value: metrics.wonDeals,
+                    icon: CheckCircle2,
+                  },
+                  {
+                    label: 'Monthly burn',
+                    value: formatCurrency(workspace.profile.monthlyBurn),
+                    icon: ShieldAlert,
+                  },
+                ].map((item) => (
+                  <Card key={item.label} className="p-5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">{item.label}</p>
+                        <p className="mt-2 text-2xl font-bold">{item.value}</p>
+                      </div>
+                      <item.icon className="h-6 w-6 text-slate-400" />
+                    </div>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { key: 'overview', label: 'Overview', icon: Target },
+                  { key: 'execution', label: 'Execution', icon: ClipboardList },
+                  { key: 'crm', label: 'CRM', icon: Users },
+                  { key: 'finance', label: 'Finance', icon: CircleDollarSign },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key as WorkspaceTab)}
+                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      activeTab === tab.key ? 'nav-tab-active' : 'nav-tab'
+                    }`}
+                  >
+                    <tab.icon className="h-4 w-4" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {activeTab === 'overview' && (
+                <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+                  <Card className="p-6 md:p-8">
+                    <h2 className="text-2xl font-bold">Value proposition</h2>
+                    <p className="mt-4 leading-relaxed text-[var(--text-muted)]">{workspace.strategy.valueProposition}</p>
+                    <div className="mt-8 grid gap-4 md:grid-cols-2">
+                      <div className="surface-muted rounded-2xl p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Industry</p>
+                        <p className="mt-2 font-semibold">{workspace.profile.industry}</p>
+                      </div>
+                      <div className="surface-muted rounded-2xl p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Business model</p>
+                        <p className="mt-2 font-semibold">{workspace.profile.businessModel}</p>
                       </div>
                     </div>
                   </Card>
-                </motion.div>
+
+                  <Card className="p-6 md:p-8">
+                    <h2 className="text-2xl font-bold">Top priorities</h2>
+                    <div className="mt-5 space-y-4">
+                      {workspace.strategy.priorities.map((priority) => (
+                        <div key={priority} className="surface-muted flex gap-3 rounded-2xl p-4">
+                          <div className="mt-1 h-2.5 w-2.5 rounded-full bg-[var(--primary)]" />
+                          <p className="text-sm leading-relaxed text-slate-700">{priority}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+
+                  <Card className="p-6 md:p-8">
+                    <h2 className="text-2xl font-bold">Milestones</h2>
+                    <div className="mt-5 space-y-4">
+                      {workspace.strategy.milestones.map((milestone) => (
+                        <div key={milestone} className="data-card rounded-2xl p-4 text-sm text-slate-700">
+                          {milestone}
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+
+                  <Card className="p-6 md:p-8">
+                    <h2 className="text-2xl font-bold">Business risks</h2>
+                    <div className="mt-5 space-y-4">
+                      {workspace.strategy.risks.map((risk) => (
+                        <div key={risk} className="risk-card rounded-2xl p-4 text-sm">
+                          {risk}
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                </div>
               )}
-            </motion.div>
+
+              {activeTab === 'execution' && (
+                <div className="space-y-6">
+                  <Card className="p-6">
+                    <div className="flex flex-col gap-4 md:flex-row">
+                      <input
+                        className="flex-1 rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                        value={newTask}
+                        onChange={(e) => setNewTask(e.target.value)}
+                        placeholder="Add a task..."
+                      />
+                      <Button onClick={addTask}>Add Task</Button>
+                    </div>
+                  </Card>
+
+                  <div className="grid gap-5 lg:grid-cols-3">
+                    {taskColumns.map((column) => (
+                      <Card key={column} className="p-5">
+                        <div className="mb-4 flex items-center justify-between">
+                          <h2 className="text-lg font-bold capitalize">{column.replace('_', ' ')}</h2>
+                          <span className="surface-muted rounded-full px-3 py-1 text-xs font-semibold text-[var(--text-muted)]">
+                            {workspace.tasks.filter((task) => task.status === column).length}
+                          </span>
+                        </div>
+                        <div className="space-y-4">
+                          {workspace.tasks
+                            .filter((task) => task.status === column)
+                            .map((task) => (
+                              <div key={task.id} className="data-card rounded-2xl p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="font-semibold">{task.title}</p>
+                                    <p className="mt-2 text-xs uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                      {task.owner} • {task.dueDate}
+                                    </p>
+                                  </div>
+                                  <span
+                                    className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
+                                      task.priority === 'high'
+                                        ? 'risk-card'
+                                        : task.priority === 'medium'
+                                          ? 'metric-warning'
+                                          : 'metric-positive'
+                                    }`}
+                                  >
+                                    {task.priority}
+                                  </span>
+                                </div>
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                  {taskColumns.map((status) => (
+                                    <button
+                                      key={status}
+                                      onClick={() => updateTaskStatus(task.id, status)}
+                                      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                                        task.status === status
+                                          ? 'nav-tab-active'
+                                          : 'nav-tab'
+                                      }`}
+                                    >
+                                      {status.replace('_', ' ')}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'crm' && (
+                <div className="space-y-6">
+                  <Card className="p-6">
+                    <div className="grid gap-4 md:grid-cols-4">
+                      <input
+                        className="rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                        value={newLead.name}
+                        onChange={(e) => setNewLead({ ...newLead, name: e.target.value })}
+                        placeholder="Contact name"
+                      />
+                      <input
+                        className="rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                        value={newLead.company}
+                        onChange={(e) => setNewLead({ ...newLead, company: e.target.value })}
+                        placeholder="Company"
+                      />
+                      <input
+                        type="number"
+                        className="rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                        value={newLead.value}
+                        onChange={(e) => setNewLead({ ...newLead, value: Number(e.target.value) })}
+                        placeholder="Deal value"
+                      />
+                      <input
+                        className="rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                        value={newLead.nextAction}
+                        onChange={(e) => setNewLead({ ...newLead, nextAction: e.target.value })}
+                        placeholder="Next action"
+                      />
+                    </div>
+                    <div className="mt-4">
+                      <Button onClick={addLead}>Add Lead</Button>
+                    </div>
+                  </Card>
+
+                  <div className="grid gap-5 lg:grid-cols-4">
+                    {leadStages.map((stage) => (
+                      <Card key={stage} className="p-5">
+                        <div className="mb-4 flex items-center justify-between">
+                          <h2 className="text-lg font-bold capitalize">{stage}</h2>
+                          <span className="surface-muted rounded-full px-3 py-1 text-xs font-semibold text-[var(--text-muted)]">
+                            {workspace.leads.filter((lead) => lead.stage === stage).length}
+                          </span>
+                        </div>
+                        <div className="space-y-4">
+                          {workspace.leads
+                            .filter((lead) => lead.stage === stage)
+                            .map((lead) => (
+                              <div key={lead.id} className="data-card rounded-2xl p-4">
+                                <p className="font-semibold">{lead.name}</p>
+                                <p className="mt-1 text-sm text-[var(--text-muted)]">{lead.company}</p>
+                                <p className="mt-3 text-sm font-semibold text-[#1b6b62]">
+                                  {formatCurrency(lead.value)}
+                                </p>
+                                <p className="mt-2 text-xs uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                                  Next: {lead.nextAction}
+                                </p>
+                                <Button className="mt-4 w-full" variant="outline" onClick={() => advanceLead(lead.id)}>
+                                  Advance Stage
+                                </Button>
+                              </div>
+                            ))}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'finance' && (
+                <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+                  <Card className="p-6 md:p-8">
+                    <h2 className="text-2xl font-bold">Cash discipline</h2>
+                    <div className="mt-6 space-y-4">
+                      <div className="surface-muted rounded-2xl p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Cash in bank</p>
+                        <p className="mt-2 text-3xl font-bold">{formatCurrency(workspace.profile.capital)}</p>
+                      </div>
+                      <div className="surface-muted rounded-2xl p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Monthly burn</p>
+                        <p className="mt-2 text-3xl font-bold">{formatCurrency(workspace.profile.monthlyBurn)}</p>
+                      </div>
+                      <div className="metric-positive rounded-2xl p-4">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em]">Estimated runway</p>
+                        <p className="mt-2 text-3xl font-bold">{metrics.runwayMonths} months</p>
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card className="p-6 md:p-8">
+                    <h2 className="text-2xl font-bold">Finance guidance</h2>
+                    <div className="mt-5 space-y-4">
+                      {workspace.strategy.financeNotes.map((note) => (
+                        <div key={note} className="data-card rounded-2xl p-4 text-sm leading-relaxed text-slate-700">
+                          {note}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-8 rounded-3xl bg-[var(--heading)] p-6 text-white">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Management note</p>
+                      <p className="mt-3 text-lg leading-relaxed text-slate-200">
+                        Treat pipeline value as confidence-adjusted, not real cash. Protect runway by tying every
+                        new expense to either delivery quality or revenue velocity.
+                      </p>
+                    </div>
+                  </Card>
+                </div>
+              )}
+
+              <Card className="p-6 md:p-8">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+                  <div className="flex-1">
+                    <h2 className="text-2xl font-bold">Business review input</h2>
+                    <p className="mt-2 text-sm text-[var(--text-muted)]">
+                      Describe the current bottleneck and generate a structured assessment with recommended actions.
+                    </p>
+                    <textarea
+                      className="mt-4 min-h-32 w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                      value={clinicInput}
+                      onChange={(e) => setClinicInput(e.target.value)}
+                      placeholder="We have product interest but weak conversion, unclear pricing, and inconsistent delivery..."
+                    />
+                  </div>
+                  <Button className="lg:mb-1" onClick={runClinic} loading={clinicLoading}>
+                    Run Review
+                  </Button>
+                </div>
+              </Card>
+            </motion.section>
           )}
 
-          {/* Wallet */}
-          {step === 'wallet' && user && (
-            <motion.div 
-              key="wallet"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="max-w-4xl mx-auto space-y-6 md:space-y-12 px-4 md:px-0"
+          {step === 'clinic' && (
+            <motion.section
+              key="clinic"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mx-auto max-w-5xl space-y-6"
             >
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-8">
-                <Card className="p-6 md:p-8 bg-black text-white">
-                  <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-zinc-500 mb-1 md:mb-2">Total Balance</p>
-                  <p className="text-2xl md:text-4xl font-bold">${user.wallet.balance.toLocaleString()}</p>
-                </Card>
-                <Card className="p-6 md:p-8">
-                  <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2">Total Invested</p>
-                  <p className="text-2xl md:text-4xl font-bold text-emerald-600">
-                    ${user.wallet.investments.reduce((sum, inv) => sum + inv.amount, 0).toLocaleString()}
-                  </p>
-                </Card>
-                <Card className="p-6 md:p-8">
-                  <p className="text-[10px] md:text-xs font-bold uppercase tracking-widest text-zinc-400 mb-1 md:mb-2">Projected Returns</p>
-                  <p className="text-2xl md:text-4xl font-bold text-amber-500">${user.wallet.returns.toLocaleString()}</p>
-                </Card>
-              </div>
-
-              <Card className="overflow-hidden">
-                <div className="p-6 md:p-8 border-b border-black/5 flex justify-between items-center">
-                  <h3 className="text-xl md:text-2xl font-bold">Investment Portfolio</h3>
-                  <WalletIcon className="w-5 h-5 md:w-6 md:h-6 text-zinc-300" />
-                </div>
-                <div className="overflow-x-auto scrollbar-hide">
-                  <table className="w-full text-left min-w-[600px] md:min-w-0">
-                    <thead>
-                      <tr className="bg-zinc-50 text-[10px] md:text-xs font-bold uppercase tracking-widest text-zinc-400">
-                        <th className="px-6 md:px-8 py-3 md:py-4">Startup</th>
-                        <th className="px-6 md:px-8 py-3 md:py-4">Date</th>
-                        <th className="px-6 md:px-8 py-3 md:py-4">Amount</th>
-                        <th className="px-6 md:px-8 py-3 md:py-4">Equity</th>
-                        <th className="px-6 md:px-8 py-3 md:py-4">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-black/5">
-                      {user.wallet.investments.length > 0 ? (
-                        user.wallet.investments.map((inv) => (
-                          <tr key={inv.id} className="hover:bg-zinc-50 transition-colors">
-                            <td className="px-6 md:px-8 py-4 md:py-6 font-bold text-sm md:text-base">{inv.businessName}</td>
-                            <td className="px-6 md:px-8 py-4 md:py-6 text-zinc-500 text-xs md:text-sm">{new Date(inv.date).toLocaleDateString()}</td>
-                            <td className="px-6 md:px-8 py-4 md:py-6 font-semibold text-sm md:text-base">${inv.amount.toLocaleString()}</td>
-                            <td className="px-6 md:px-8 py-4 md:py-6 text-emerald-600 font-bold text-sm md:text-base">{inv.equity}%</td>
-                            <td className="px-6 md:px-8 py-4 md:py-6">
-                              <span className="px-2 md:px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-[10px] md:text-xs font-bold uppercase tracking-wider">Active</span>
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className="px-6 md:px-8 py-8 md:py-12 text-center text-xs md:text-sm text-zinc-400 italic">
-                            No investments made yet. Explore opportunities in the dashboard.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+              <Card className="panel-strong overflow-hidden text-white">
+                <div className="p-8">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 text-sky-200">
+                      <Stethoscope className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h1 className="text-3xl font-bold tracking-tight">Business Review</h1>
+                      <p className="text-sm text-slate-300">
+                        Assess bottlenecks, refine operating actions, and improve readiness for the next stage of growth.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </Card>
 
-              {/* Cap Table Simulation */}
-              {user.wallet.investments.length > 0 && (
-                <Card className="p-6 md:p-10">
-                  <h3 className="text-xl md:text-2xl font-bold mb-6 md:mb-8 flex items-center gap-2 md:gap-3">
-                    <PieChart className="w-5 h-5 md:w-6 md:h-6 text-emerald-600" /> Ownership Structure (Cap Table)
-                  </h3>
-                  <div className="space-y-4 md:space-y-6">
-                    {user.wallet.investments.map((inv) => (
-                      <div key={inv.id} className="space-y-1 md:space-y-2">
-                        <div className="flex justify-between text-xs md:text-sm font-bold">
-                          <span>{inv.businessName}</span>
-                          <span>{inv.equity}% Ownership</span>
-                        </div>
-                        <div className="w-full h-3 md:h-4 bg-zinc-100 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-emerald-500 transition-all duration-1000" 
-                            style={{ width: `${inv.equity}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
+              {workspace && (
+                <Card className="p-6 md:p-8">
+                  <textarea
+                    className="min-h-36 w-full rounded-2xl border border-slate-900/10 bg-white/80 px-4 py-3 outline-none transition"
+                    value={clinicInput}
+                    onChange={(e) => setClinicInput(e.target.value)}
+                    placeholder="Describe your current business challenge in detail..."
+                  />
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Button onClick={runClinic} loading={clinicLoading}>
+                      Generate Review
+                    </Button>
+                    <Button variant="outline" onClick={() => setStep(workspace ? 'workspace' : 'landing')}>
+                      Back to Workspace
+                    </Button>
                   </div>
                 </Card>
               )}
-            </motion.div>
+
+              {clinicReport ? (
+                <div className="grid gap-6">
+                  <Card className="border-l-4 border-l-[var(--primary)] p-6 md:p-8">
+                    <h2 className="text-2xl font-bold">Assessment</h2>
+                    <p className="mt-4 leading-relaxed text-slate-700">{clinicReport.diagnosis}</p>
+                  </Card>
+
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <Card className="p-6 md:p-8">
+                      <h2 className="text-xl font-bold">Recovery strategies</h2>
+                      <div className="mt-4 space-y-3">
+                        {clinicReport.recoveryStrategies.map((item) => (
+                          <div key={item} className="surface-muted rounded-2xl p-4 text-sm text-slate-700">
+                            {item}
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                    <Card className="p-6 md:p-8">
+                      <h2 className="text-xl font-bold">Growth recommendations</h2>
+                      <div className="mt-4 space-y-3">
+                        {clinicReport.growthRecommendations.map((item) => (
+                          <div key={item} className="surface-muted rounded-2xl p-4 text-sm text-slate-700">
+                            {item}
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  </div>
+
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <Card className="p-6 md:p-8">
+                      <h2 className="text-xl font-bold">Pivot opportunities</h2>
+                      <div className="mt-4 space-y-3">
+                        {clinicReport.pivotOpportunities.map((item) => (
+                          <div key={item} className="data-card rounded-2xl p-4 text-sm text-slate-700">
+                            {item}
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                    <Card className="p-6 md:p-8">
+                      <h2 className="text-xl font-bold">Investor readiness next steps</h2>
+                      <div className="mt-4 space-y-3">
+                        {clinicReport.investmentReadySteps.map((item, index) => (
+                          <div key={item} className="data-card flex gap-3 rounded-2xl p-4 text-sm text-slate-700">
+                            <span className="font-bold text-[var(--primary)]">{index + 1}.</span>
+                            <span>{item}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  </div>
+                </div>
+              ) : (
+                <Card className="p-10 text-center">
+                  <h2 className="text-2xl font-bold">No review generated yet</h2>
+                  <p className="mt-3 text-[var(--text-muted)]">
+                    Add business context above to generate an operational assessment and recommended next steps.
+                  </p>
+                </Card>
+              )}
+            </motion.section>
           )}
         </AnimatePresence>
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-black/5 py-8 md:py-12 px-4 md:px-6 mt-10 md:mt-20">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6 md:gap-8">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 md:w-8 md:h-8 bg-black rounded-lg flex items-center justify-center">
-              <Rocket className="text-white w-3 h-3 md:w-4 md:h-4" />
-            </div>
-            <span className="text-base md:text-lg font-bold tracking-tight">BusineX Ai</span>
-          </div>
-          <p className="text-zinc-400 text-[10px] md:text-sm text-center md:text-left">© 2026 BusineX Ai. Empowering global innovation through hyper-local intelligence.</p>
-          <div className="flex gap-4 md:gap-6">
-            <Globe className="w-4 h-4 md:w-5 md:h-5 text-zinc-300 hover:text-black cursor-pointer transition-colors" />
-            <Users className="w-4 h-4 md:w-5 md:h-5 text-zinc-300 hover:text-black cursor-pointer transition-colors" />
-            <TrendingUp className="w-4 h-4 md:w-5 md:h-5 text-zinc-300 hover:text-black cursor-pointer transition-colors" />
-          </div>
+      <footer className="border-t border-slate-900/[0.08] px-4 py-8 md:px-6">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <p className="text-sm text-[var(--text-muted)]">BusineX AI supports planning, execution, pipeline management, and business review in one workspace.</p>
+          <p className="text-sm text-slate-400">Designed for disciplined operators building sustainable companies.</p>
         </div>
       </footer>
     </div>
