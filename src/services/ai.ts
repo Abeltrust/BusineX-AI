@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { BusinessIdea, Roadmap, PitchDeck, BusinessClinicReport, UserProfile } from "../types";
 
-const apiKey = process.env.GEMINI_API_KEY || "";
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
 const genAI = new GoogleGenAI({ apiKey });
 
 export const generateBusinessIdeas = async (user: UserProfile): Promise<BusinessIdea[]> => {

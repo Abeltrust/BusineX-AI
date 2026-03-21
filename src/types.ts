@@ -1,6 +1,9 @@
 export type UserType = 'founder' | 'investor';
 
 export interface UserProfile {
+  uid?: string;
+  email?: string;
+  photoURL?: string;
   type: UserType;
   name: string;
   location: {
