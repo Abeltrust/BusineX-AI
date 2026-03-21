@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { BusinessClinicReport, FounderProfile, FounderStrategy } from '../types';
 
-const apiKey = process.env.GEMINI_API_KEY || '';
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
 const model = 'gemini-3-flash-preview';
 

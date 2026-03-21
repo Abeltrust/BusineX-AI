@@ -8,9 +8,9 @@
 
 @layer base {
   :root {
-    --page-bg: #f3f7fb;
-    --page-accent: #dbe7f2;
-    --surface: rgba(255, 255, 255, 0.84);
+    --page-bg: #edf2f7;
+    --page-accent: #d8e5ef;
+    --surface: rgba(255, 255, 255, 0.88);
     --surface-strong: #ffffff;
     --surface-muted: #edf3f8;
     --line: rgba(15, 23, 42, 0.1);
@@ -18,9 +18,9 @@
     --text: #102033;
     --text-muted: #58708a;
     --heading: #0b1727;
-    --primary: #0f4c81;
-    --primary-strong: #0b3a62;
-    --primary-soft: #dbe8f5;
+    --primary: #0c5b77;
+    --primary-strong: #08465b;
+    --primary-soft: #d7edf4;
     --success-soft: #dff4ec;
     --success-text: #176347;
     --warning-soft: #fdf0db;
@@ -31,8 +31,9 @@
 
   html {
     background:
-      radial-gradient(circle at top left, rgba(15, 76, 129, 0.12), transparent 28%),
-      linear-gradient(180deg, #f7fbff 0%, var(--page-bg) 48%, #eef4f9 100%);
+      radial-gradient(circle at top left, rgba(12, 91, 119, 0.13), transparent 28%),
+      radial-gradient(circle at right top, rgba(186, 130, 54, 0.12), transparent 24%),
+      linear-gradient(180deg, #f8fbfd 0%, var(--page-bg) 48%, #e7eef4 100%);
   }
 
   body {
@@ -85,6 +86,10 @@
     @apply font-display tracking-tight;
     color: var(--heading);
   }
+
+  #root {
+    min-height: 100vh;
+  }
 }
 
 .app-shell {
@@ -97,8 +102,8 @@
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at right top, rgba(15, 76, 129, 0.12), transparent 24%),
-    radial-gradient(circle at left 20%, rgba(39, 124, 122, 0.1), transparent 20%);
+    radial-gradient(circle at right top, rgba(12, 91, 119, 0.12), transparent 24%),
+    radial-gradient(circle at left 20%, rgba(167, 99, 27, 0.1), transparent 20%);
 }
 
 .panel {
@@ -124,13 +129,13 @@
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--primary) 0%, #155f9c 100%);
+  background: linear-gradient(135deg, var(--primary) 0%, #1784a5 100%);
   color: white;
-  box-shadow: 0 12px 24px rgba(15, 76, 129, 0.2);
+  box-shadow: 0 12px 24px rgba(12, 91, 119, 0.22);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, var(--primary-strong) 0%, #0f4c81 100%);
+  background: linear-gradient(135deg, var(--primary-strong) 0%, #0c5b77 100%);
   transform: translateY(-1px);
 }
 
@@ -204,6 +209,19 @@
 
 .nav-tab-active {
   cursor: pointer;
+}
+
+.field {
+  width: 100%;
+  border-radius: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 0.85rem 1rem;
+  outline: none;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
 }
 
 .btn-primary,
